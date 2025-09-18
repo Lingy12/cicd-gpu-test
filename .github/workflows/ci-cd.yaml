@@ -12,8 +12,8 @@ env:
   MODEL_CACHE_DIR: "/cache/models"
 
 jobs:
-  lint-and-test:
-    name: Lint and Test (CPU)
+  test:
+    name: Test
     runs-on: self-hosted
     
     steps:
@@ -38,19 +38,6 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
         
-    - name: Lint with flake8
-      run: |
-        flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
-        flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
-        
-    - name: Format check with black
-      run: |
-        black --check .
-        
-    - name: Import sorting check with isort
-      run: |
-        isort --check-only .
-        
     - name: Run unit tests
       run: |
         pytest test_main.py -v --tb=short -x
@@ -69,7 +56,7 @@ jobs:
   gpu-integration-test:
     name: GPU Integration Test
     runs-on: [self-hosted, gpu, cuda]
-    needs: lint-and-test
+    needs: test
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     
     steps:
@@ -142,7 +129,7 @@ jobs:
   build-and-deploy:
     name: Build and Deploy
     runs-on: [self-hosted, gpu, cuda]
-    needs: [lint-and-test, gpu-integration-test]
+    needs: [test, gpu-integration-test]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     
     steps:

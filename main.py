@@ -57,7 +57,7 @@ def load_model():
 
         logger.info(f"Loading model for {model_name}")
         model = AutoModelForCausalLM.from_pretrained(
-            model_name, torch_dtype="auto", device_map="auto"
+            model_name, torch_dtype="auto", device_map="cuda"
         )
         logger.info("Model and tokenizer loaded successfully")
     except Exception as e:

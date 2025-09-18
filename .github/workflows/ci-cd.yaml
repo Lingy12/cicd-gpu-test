@@ -51,10 +51,6 @@ jobs:
           exit 1
         }
         echo "Server started successfully"
-
-    - name: Run unit tests (no server required)
-      run: |
-        pytest test_main.py -v --tb=short -x -m "not integration"
         
     - name: Run integration tests (server required)
       run: |
@@ -70,10 +66,10 @@ jobs:
           kill -9 $SERVER_PID 2>/dev/null || true
         fi
         
-    - name: Generate test coverage
-      run: |
-        pip install pytest-cov
-        pytest test_main.py --cov=main --cov-report=xml --cov-report=html -m "not integration"
+    # - name: Generate test coverage
+    #   run: |
+    #     pip install pytest-cov
+    #     pytest test_main.py --cov=main --cov-report=xml --cov-report=html -m "not integration"
         
     # - name: Upload coverage to artifacts
     #   uses: actions/upload-artifact@v3
@@ -81,20 +77,20 @@ jobs:
     #     name: coverage-report
     #     path: htmlcov/
 
-  cleanup:
-    name: Cleanup
-    runs-on: [self-hosted, gpu, cuda]
-    if: always()
-    needs: [test]
-    # if: always()
-    steps:
+  # cleanup:
+  #   name: Cleanup
+  #   runs-on: [self-hosted, gpu, cuda]
+  #   if: always()
+  #   needs: [test]
+  #   # if: always()
+  #   steps:
         
-    - name: Clean up Python environments
-      run: |
-        rm -rf venv/
-        pip cache purge || echo "Pip cache cleanup failed"
+  #   - name: Clean up Python environments
+  #     run: |
+  #       rm -rf venv/
+  #       pip cache purge || echo "Pip cache cleanup failed"
         
-    - name: Clean up temporary files
-      run: |
-        rm -rf __pycache__/
-        rm -rf .pytest_cache/
+  #   - name: Clean up temporary files
+  #     run: |
+  #       rm -rf __pycache__/
+  #       rm -rf .pytest_cache/

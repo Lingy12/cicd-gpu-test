@@ -14,7 +14,7 @@ env:
 jobs:
   lint-and-test:
     name: Lint and Test (CPU)
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     
     steps:
     - name: Checkout code
@@ -68,12 +68,9 @@ jobs:
 
   gpu-integration-test:
     name: GPU Integration Test
-    runs-on: self-hosted
+    runs-on: [self-hosted, gpu, cuda]
     needs: lint-and-test
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
-    
-    # Add labels for self-hosted runners with specific capabilities
-    labels: [self-hosted, gpu, cuda]
     
     steps:
     - name: Checkout code
@@ -144,11 +141,9 @@ jobs:
 
   build-and-deploy:
     name: Build and Deploy
-    runs-on: self-hosted
+    runs-on: [self-hosted, gpu, cuda]
     needs: [lint-and-test, gpu-integration-test]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    
-    labels: [self-hosted, gpu, cuda]
     
     steps:
     - name: Checkout code
@@ -191,11 +186,9 @@ jobs:
 
   cleanup:
     name: Cleanup
-    runs-on: self-hosted
+    runs-on: [self-hosted, gpu, cuda]
     if: always()
     needs: [gpu-integration-test, build-and-deploy]
-    
-    labels: [self-hosted, gpu, cuda]
     
     steps:
     - name: Clean up Docker images

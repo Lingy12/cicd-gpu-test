@@ -38,14 +38,42 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
         
-    - name: Run unit tests
+    - name: Run unit tests (no server required)
       run: |
-        pytest test_main.py -v --tb=short -x
+        pytest test_main.py -v --tb=short -x -m "not integration"
+        
+    - name: Start server for integration tests
+      run: |
+        python main.py &
+        SERVER_PID=$!
+        echo "SERVER_PID=$SERVER_PID" >> $GITHUB_ENV
+        
+        # Wait for server to start with timeout
+        timeout 60 bash -c 'until curl -s http://localhost:8000/health > /dev/null; do sleep 2; done' || {
+          echo "Server failed to start within 60 seconds"
+          kill $SERVER_PID 2>/dev/null || true
+          exit 1
+        }
+        echo "Server started successfully"
+        
+    - name: Run integration tests (server required)
+      run: |
+        pytest test_main.py -v --tb=short -x -m "integration"
+        
+    - name: Stop test server
+      if: always()
+      run: |
+        if [ ! -z "$SERVER_PID" ]; then
+          kill $SERVER_PID 2>/dev/null || true
+          sleep 2
+          # Force kill if still running
+          kill -9 $SERVER_PID 2>/dev/null || true
+        fi
         
     - name: Generate test coverage
       run: |
         pip install pytest-cov
-        pytest test_main.py --cov=main --cov-report=xml --cov-report=html
+        pytest test_main.py --cov=main --cov-report=xml --cov-report=html -m "not integration"
         
     # - name: Upload coverage to artifacts
     #   uses: actions/upload-artifact@v3

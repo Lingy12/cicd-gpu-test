@@ -227,10 +227,45 @@ class TestModelLoading:
 
 @pytest.mark.integration
 class TestIntegration:
-    """Integration tests - require actual model"""
+    """Integration tests - require running server"""
+
+    def test_server_health_check(self):
+        """Test server health check endpoint against running server"""
+        import requests
+        import time
+        
+        # Give server a moment to be fully ready
+        time.sleep(1)
+        
+        try:
+            response = requests.get("http://localhost:8000/health", timeout=10)
+            assert response.status_code == 200
+            data = response.json()
+            assert data["status"] == "healthy"
+            assert "model_loaded" in data
+            assert "device" in data
+        except requests.exceptions.RequestException as e:
+            pytest.fail(f"Failed to connect to running server: {e}")
+
+    def test_server_root_endpoint(self):
+        """Test server root endpoint against running server"""
+        import requests
+        import time
+        
+        # Give server a moment to be fully ready
+        time.sleep(1)
+        
+        try:
+            response = requests.get("http://localhost:8000/", timeout=10)
+            assert response.status_code == 200
+            data = response.json()
+            assert data["message"] == "Qwen Thinking Model API"
+            assert data["docs"] == "/docs"
+        except requests.exceptions.RequestException as e:
+            pytest.fail(f"Failed to connect to running server: {e}")
 
     @pytest.mark.skip(reason="Requires actual model download")
-    def test_full_pipeline(self):
+    def test_full_pipeline_with_model(self):
         """Test full pipeline with actual model (skipped by default)"""
         # This test would require actual model loading
         # and would be slow, so it's skipped by default

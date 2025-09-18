@@ -1,0 +1,216 @@
+name: CI/CD Pipeline with GPU Support
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+env:
+  PYTHON_VERSION: "3.10"
+  MODEL_CACHE_DIR: "/cache/models"
+
+jobs:
+  lint-and-test:
+    name: Lint and Test (CPU)
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        
+    - name: Cache pip dependencies
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+          
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        
+    - name: Lint with flake8
+      run: |
+        flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+        flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+        
+    - name: Format check with black
+      run: |
+        black --check .
+        
+    - name: Import sorting check with isort
+      run: |
+        isort --check-only .
+        
+    - name: Run unit tests
+      run: |
+        pytest test_main.py -v --tb=short -x
+        
+    - name: Generate test coverage
+      run: |
+        pip install pytest-cov
+        pytest test_main.py --cov=main --cov-report=xml --cov-report=html
+        
+    - name: Upload coverage to artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: coverage-report
+        path: htmlcov/
+
+  gpu-integration-test:
+    name: GPU Integration Test
+    runs-on: self-hosted
+    needs: lint-and-test
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    
+    # Add labels for self-hosted runners with specific capabilities
+    labels: [self-hosted, gpu, cuda]
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Check GPU availability
+      run: |
+        nvidia-smi || echo "NVIDIA GPU not available"
+        python -c "import torch; print(f'CUDA available: {torch.cuda.is_available()}')"
+        python -c "import torch; print(f'CUDA devices: {torch.cuda.device_count()}')" || echo "No CUDA devices"
+        
+    - name: Set up Python environment
+      run: |
+        python -m venv venv
+        source venv/bin/activate
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        
+    - name: Cache model downloads
+      uses: actions/cache@v3
+      with:
+        path: ${{ env.MODEL_CACHE_DIR }}
+        key: qwen-model-${{ hashFiles('main.py') }}
+        restore-keys: |
+          qwen-model-
+          
+    - name: Set model cache environment
+      run: |
+        echo "HF_HOME=${{ env.MODEL_CACHE_DIR }}" >> $GITHUB_ENV
+        echo "TRANSFORMERS_CACHE=${{ env.MODEL_CACHE_DIR }}" >> $GITHUB_ENV
+        
+    - name: Download and test model loading (if not cached)
+      run: |
+        source venv/bin/activate
+        python -c "
+        from main import load_model
+        import logging
+        logging.basicConfig(level=logging.INFO)
+        try:
+            load_model()
+            print('Model loaded successfully')
+        except Exception as e:
+            print(f'Model loading failed: {e}')
+            exit(1)
+        "
+        
+    - name: Run API server health check
+      run: |
+        source venv/bin/activate
+        python main.py &
+        SERVER_PID=$!
+        sleep 30  # Wait for server to start
+        
+        # Health check
+        curl -f http://localhost:8000/health || exit 1
+        
+        # Basic API test
+        curl -X POST "http://localhost:8000/chat" \
+             -H "Content-Type: application/json" \
+             -d '{"prompt": "Hello", "max_new_tokens": 50}' || exit 1
+             
+        kill $SERVER_PID
+        
+    - name: Run integration tests
+      run: |
+        source venv/bin/activate
+        pytest test_main.py::TestIntegration -v -m integration || echo "Integration tests skipped"
+
+  build-and-deploy:
+    name: Build and Deploy
+    runs-on: self-hosted
+    needs: [lint-and-test, gpu-integration-test]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    
+    labels: [self-hosted, gpu, cuda]
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Build Docker image
+      run: |
+        docker build -t qwen-api:latest -t qwen-api:${{ github.sha }} .
+        
+    - name: Test Docker container
+      run: |
+        # Run container in background
+        docker run -d --name test-container --gpus all -p 8001:8000 qwen-api:latest
+        sleep 30
+        
+        # Health check
+        curl -f http://localhost:8001/health
+        
+        # Clean up
+        docker stop test-container
+        docker rm test-container
+        
+    - name: Deploy to staging (if configured)
+      if: success()
+      run: |
+        echo "Deploy to staging environment"
+        # Add your deployment commands here
+        # For example:
+        # docker tag qwen-api:latest registry.example.com/qwen-api:staging
+        # docker push registry.example.com/qwen-api:staging
+        
+    - name: Deploy to production (if main branch)
+      if: success() && github.ref == 'refs/heads/main'
+      run: |
+        echo "Deploy to production environment"
+        # Add your production deployment commands here
+        # For example:
+        # docker tag qwen-api:latest registry.example.com/qwen-api:production
+        # docker push registry.example.com/qwen-api:production
+
+  cleanup:
+    name: Cleanup
+    runs-on: self-hosted
+    if: always()
+    needs: [gpu-integration-test, build-and-deploy]
+    
+    labels: [self-hosted, gpu, cuda]
+    
+    steps:
+    - name: Clean up Docker images
+      run: |
+        docker system prune -f
+        docker image prune -f
+        
+    - name: Clean up Python environments
+      run: |
+        rm -rf venv/
+        pip cache purge || echo "Pip cache cleanup failed"
+        
+    - name: Clean up temporary files
+      run: |
+        rm -rf __pycache__/
+        rm -rf .pytest_cache/
+        rm -rf htmlcov/
+        rm -f .coverage

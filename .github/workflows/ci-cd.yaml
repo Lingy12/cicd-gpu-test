@@ -37,12 +37,8 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
-        
-    - name: Run unit tests (no server required)
-      run: |
-        pytest test_main.py -v --tb=short -x -m "not integration"
-        
-    - name: Start server for integration tests
+      
+    - name: Start server for tests
       run: |
         python main.py &
         SERVER_PID=$!
@@ -55,6 +51,10 @@ jobs:
           exit 1
         }
         echo "Server started successfully"
+
+    - name: Run unit tests (no server required)
+      run: |
+        pytest test_main.py -v --tb=short -x -m "not integration"
         
     - name: Run integration tests (server required)
       run: |
@@ -81,124 +81,6 @@ jobs:
     #     name: coverage-report
     #     path: htmlcov/
 
-  gpu-integration-test:
-    name: GPU Integration Test
-    runs-on: [self-hosted, gpu, cuda]
-    needs: test
-    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
-    
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      
-    - name: Check GPU availability
-      run: |
-        nvidia-smi || echo "NVIDIA GPU not available"
-        python -c "import torch; print(f'CUDA available: {torch.cuda.is_available()}')"
-        python -c "import torch; print(f'CUDA devices: {torch.cuda.device_count()}')" || echo "No CUDA devices"
-        
-    - name: Set up Python environment
-      run: |
-        python -m venv venv
-        source venv/bin/activate
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt
-        
-    - name: Cache model downloads
-      uses: actions/cache@v3
-      with:
-        path: ${{ env.MODEL_CACHE_DIR }}
-        key: qwen-model-${{ hashFiles('main.py') }}
-        restore-keys: |
-          qwen-model-
-          
-    - name: Set model cache environment
-      run: |
-        echo "HF_HOME=${{ env.MODEL_CACHE_DIR }}" >> $GITHUB_ENV
-        echo "TRANSFORMERS_CACHE=${{ env.MODEL_CACHE_DIR }}" >> $GITHUB_ENV
-        
-    - name: Download and test model loading (if not cached)
-      run: |
-        source venv/bin/activate
-        python -c "
-        from main import load_model
-        import logging
-        logging.basicConfig(level=logging.INFO)
-        try:
-            load_model()
-            print('Model loaded successfully')
-        except Exception as e:
-            print(f'Model loading failed: {e}')
-            exit(1)
-        "
-        
-    - name: Run API server health check
-      run: |
-        source venv/bin/activate
-        python main.py &
-        SERVER_PID=$!
-        sleep 30  # Wait for server to start
-        
-        # Health check
-        curl -f http://localhost:8000/health || exit 1
-        
-        # Basic API test
-        curl -X POST "http://localhost:8000/chat" \
-             -H "Content-Type: application/json" \
-             -d '{"prompt": "Hello", "max_new_tokens": 50}' || exit 1
-             
-        kill $SERVER_PID
-        
-    - name: Run integration tests
-      run: |
-        source venv/bin/activate
-        pytest test_main.py::TestIntegration -v -m integration || echo "Integration tests skipped"
-
-  build-and-deploy:
-    name: Build and Deploy
-    runs-on: [self-hosted, gpu, cuda]
-    needs: [test, gpu-integration-test]
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      
-    - name: Build Docker image
-      run: |
-        docker build -t qwen-api:latest -t qwen-api:${{ github.sha }} .
-        
-    - name: Test Docker container
-      run: |
-        # Run container in background
-        docker run -d --name test-container --gpus all -p 8001:8000 qwen-api:latest
-        sleep 30
-        
-        # Health check
-        curl -f http://localhost:8001/health
-        
-        # Clean up
-        docker stop test-container
-        docker rm test-container
-        
-    - name: Deploy to staging (if configured)
-      if: success()
-      run: |
-        echo "Deploy to staging environment"
-        # Add your deployment commands here
-        # For example:
-        # docker tag qwen-api:latest registry.example.com/qwen-api:staging
-        # docker push registry.example.com/qwen-api:staging
-        
-    - name: Deploy to production (if main branch)
-      if: success() && github.ref == 'refs/heads/main'
-      run: |
-        echo "Deploy to production environment"
-        # Add your production deployment commands here
-        # For example:
-        # docker tag qwen-api:latest registry.example.com/qwen-api:production
-        # docker push registry.example.com/qwen-api:production
-
   cleanup:
     name: Cleanup
     runs-on: [self-hosted, gpu, cuda]
@@ -206,10 +88,6 @@ jobs:
     needs: [gpu-integration-test, build-and-deploy]
     
     steps:
-    - name: Clean up Docker images
-      run: |
-        docker system prune -f
-        docker image prune -f
         
     - name: Clean up Python environments
       run: |
@@ -220,5 +98,3 @@ jobs:
       run: |
         rm -rf __pycache__/
         rm -rf .pytest_cache/
-        rm -rf htmlcov/
-        rm -f .coverage

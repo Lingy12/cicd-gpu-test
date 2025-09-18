@@ -49,7 +49,7 @@ def load_model():
     if model is not None and tokenizer is not None:
         return
 
-    model_name = "Qwen/Qwen3-4B-Thinking-2507-FP8"
+    model_name = "Qwen/Qwen3-4B-Thinking-2507"
 
     try:
         logger.info(f"Loading tokenizer for {model_name}")

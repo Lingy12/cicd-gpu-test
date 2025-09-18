@@ -85,8 +85,8 @@ jobs:
     name: Cleanup
     runs-on: [self-hosted, gpu, cuda]
     if: always()
-    needs: [gpu-integration-test, build-and-deploy]
-    
+    needs: [test]
+    # if: always()
     steps:
         
     - name: Clean up Python environments
